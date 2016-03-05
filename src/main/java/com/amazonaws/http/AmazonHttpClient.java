@@ -43,6 +43,7 @@ import org.apache.http.client.methods.HttpRequestBase;
 import org.apache.http.conn.scheme.Scheme;
 import org.apache.http.conn.scheme.SchemeRegistry;
 import org.apache.http.conn.ssl.SSLSocketFactory;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.protocol.BasicHttpContext;
 import org.apache.http.protocol.HttpContext;
 
@@ -90,7 +91,7 @@ public class AmazonHttpClient {
     static final Log log = LogFactory.getLog(AmazonHttpClient.class);
 
     /** Internal client for sending HTTP requests */
-    private final HttpClient httpClient;
+    private final CloseableHttpClient httpClient;
 
     /** Client configuration options, such as proxy settings, max retries, etc. */
     private final ClientConfiguration config;
@@ -567,6 +568,11 @@ public class AmazonHttpClient {
     public void shutdown() {
         IdleConnectionReaper.removeConnectionManager(httpClient.getConnectionManager());
         httpClient.getConnectionManager().shutdown();
+        try {
+            httpClient.close();
+        } catch ( IOException e ) {
+            log.warn("Cannot close the http client's resources.", e);
+        }
     }
 
     /**

@@ -14,20 +14,52 @@
  */
 package com.amazonaws.http;
 
-import org.apache.http.impl.conn.PoolingClientConnectionManager;
-import org.apache.http.params.HttpParams;
+import org.apache.http.config.Registry;
+import org.apache.http.conn.ClientConnectionManager;
+import org.apache.http.conn.ClientConnectionRequest;
+import org.apache.http.conn.ManagedClientConnection;
+import org.apache.http.conn.routing.HttpRoute;
+import org.apache.http.conn.scheme.SchemeRegistry;
+import org.apache.http.conn.socket.ConnectionSocketFactory;
+import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 
 import com.amazonaws.ClientConfiguration;
+
+import java.util.concurrent.TimeUnit;
 
 /** Responsible for creating and configuring instances of Apache HttpClient4's Connection Manager. */
 class ConnectionManagerFactory {
 
-    public static PoolingClientConnectionManager createPoolingClientConnManager( ClientConfiguration config, HttpParams httpClientParams ) {
-        PoolingClientConnectionManager connectionManager = new PoolingClientConnectionManager();
+    public static PoolingHttpClientConnectionManager createPoolingClientConnManager(ClientConfiguration config, Registry<ConnectionSocketFactory> registry) {
+        final PoolingHttpClientConnectionManager connectionManager = new PoolingHttpClientConnectionManager(registry);
         connectionManager.setDefaultMaxPerRoute(config.getMaxConnections());
         connectionManager.setMaxTotal(config.getMaxConnections());
         if (config.useReaper()) {
-            IdleConnectionReaper.registerConnectionManager(connectionManager);
+            IdleConnectionReaper.registerConnectionManager(new ClientConnectionManager() {
+                public SchemeRegistry getSchemeRegistry() {
+                    throw new UnsupportedOperationException();
+                }
+
+                public ClientConnectionRequest requestConnection(HttpRoute httpRoute, Object o) {
+                    throw new UnsupportedOperationException();
+                }
+
+                public void releaseConnection(ManagedClientConnection managedClientConnection, long l, TimeUnit timeUnit) {
+                    throw new UnsupportedOperationException();
+                }
+
+                public void closeIdleConnections(long l, TimeUnit timeUnit) {
+                    connectionManager.closeIdleConnections(l, timeUnit);
+                }
+
+                public void closeExpiredConnections() {
+                    connectionManager.closeExpiredConnections();
+                }
+
+                public void shutdown() {
+                    connectionManager.shutdown();
+                }
+            });
         }
         return connectionManager;
     }

@@ -14,54 +14,54 @@
  */
 package com.amazonaws.http.conn;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.apache.http.conn.ConnectionRequest;
+import org.apache.http.conn.HttpClientConnectionManager;
+
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-import org.apache.http.conn.ClientConnectionManager;
-import org.apache.http.conn.ClientConnectionRequest;
-
-public class ClientConnectionManagerFactory {
-    private static final Log log = LogFactory.getLog(ClientConnectionManagerFactory.class);
+public class HttpClientConnectionManagerFactory {
+    private static final Log log = LogFactory.getLog(HttpClientConnectionManagerFactory.class);
     private static final Class<?>[] interfaces = {
-        ClientConnectionManager.class,
+        HttpClientConnectionManager.class,
         Wrapped.class
     };
 
     /**
-     * Returns a wrapped instance of {@link ClientConnectionManager}
+     * Returns a wrapped instance of {@link HttpClientConnectionManager}
      * to capture the necessary performance metrics.
      * @param orig the target instance to be wrapped
      */
-    public static ClientConnectionManager wrap(ClientConnectionManager orig) {
+    public static HttpClientConnectionManager wrap(HttpClientConnectionManager orig) {
         if (orig instanceof Wrapped)
             throw new IllegalArgumentException();
-        return (ClientConnectionManager) Proxy.newProxyInstance(
+        return (HttpClientConnectionManager) Proxy.newProxyInstance(
                 // https://github.com/aws/aws-sdk-java/pull/48#issuecomment-29454423
-                ClientConnectionManagerFactory.class.getClassLoader(),
+                HttpClientConnectionManagerFactory.class.getClassLoader(),
                 interfaces,
                 new Handler(orig));
     }
 
     /**
-     * The handler behind the dynamic proxy for {@link ClientConnectionManager}
-     * so that the any returned instance of {@link ClientConnectionRequest} can
+     * The handler behind the dynamic proxy for {@link HttpClientConnectionManager}
+     * so that the any returned instance of {@link HttpClientConnectionManager} can
      * further wrapped for capturing performance metrics.
      */
     private static class Handler implements InvocationHandler {
-        private final ClientConnectionManager orig;
-        Handler(ClientConnectionManager real) {
+        private final HttpClientConnectionManager orig;
+        Handler(HttpClientConnectionManager real) {
             this.orig = real;
         }
-        @Override
+
         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
             try {
                 Object ret = method.invoke(orig, args);
-                return ret instanceof ClientConnectionRequest
-                     ? ClientConnectionRequestFactory.wrap((ClientConnectionRequest) ret)
+                return ret instanceof ConnectionRequest
+                     ? ConnectionRequestFactory.wrap((ConnectionRequest) ret)
                      : ret
                      ;
             } catch (InvocationTargetException e) {

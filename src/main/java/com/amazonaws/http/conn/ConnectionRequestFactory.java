@@ -14,56 +14,55 @@
  */
 package com.amazonaws.http.conn;
 
+import com.amazonaws.metrics.AwsSdkMetrics;
+import com.amazonaws.metrics.ServiceLatencyProvider;
+import com.amazonaws.util.AWSServiceMetrics;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.apache.http.conn.ConnectionRequest;
+
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-import org.apache.http.conn.ClientConnectionRequest;
-
-import com.amazonaws.metrics.AwsSdkMetrics;
-import com.amazonaws.metrics.ServiceLatencyProvider;
-import com.amazonaws.util.AWSServiceMetrics;
-
-class ClientConnectionRequestFactory {
-    private static final Log log = LogFactory.getLog(ClientConnectionRequestFactory.class);
+class ConnectionRequestFactory {
+    private static final Log log = LogFactory.getLog(ConnectionRequestFactory.class);
     private static final Class<?>[] interfaces = {
-        ClientConnectionRequest.class,
+        ConnectionRequest.class,
         Wrapped.class
     };
 
     /**
-     * Returns a wrapped instance of {@link ClientConnectionRequest}
+     * Returns a wrapped instance of {@link ConnectionRequest}
      * to capture the necessary performance metrics.
      * @param orig the target instance to be wrapped
      */
-    static ClientConnectionRequest wrap(ClientConnectionRequest orig) {
+    static ConnectionRequest wrap(ConnectionRequest orig) {
         if (orig instanceof Wrapped)
             throw new IllegalArgumentException();
-        return (ClientConnectionRequest) Proxy.newProxyInstance(
+        return (ConnectionRequest) Proxy.newProxyInstance(
                 // https://github.com/aws/aws-sdk-java/pull/48#issuecomment-29454423
-                ClientConnectionRequestFactory.class.getClassLoader(),
+                ConnectionRequestFactory.class.getClassLoader(),
                 interfaces,
                 new Handler(orig));
     }
 
     /**
-     * The handler behind the dynamic proxy for {@link ClientConnectionRequest}
+     * The handler behind the dynamic proxy for {@link ConnectionRequest}
      * so that the latency of the
-     * {@link ClientConnectionRequest#getConnection(long, java.util.concurrent.TimeUnit)}
+     * {@link ConnectionRequest#get(long, java.util.concurrent.TimeUnit)}
      * can be captured.
      */
     private static class Handler implements InvocationHandler {
-        private final ClientConnectionRequest orig;
-        Handler(ClientConnectionRequest orig) {
+        private final ConnectionRequest orig;
+        Handler(ConnectionRequest orig) {
             this.orig = orig;
         }
-        @Override
+
         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
             try {
-                if ("getConnection".equals(method.getName())) {
+                if ("get".equals(method.getName())) {
                     ServiceLatencyProvider latencyProvider = new ServiceLatencyProvider(
                             AWSServiceMetrics.HttpClientGetConnectionTime);
                     try {

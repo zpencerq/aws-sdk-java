@@ -19,7 +19,6 @@ import static com.amazonaws.SDKGlobalConfiguration.DISABLE_CERT_CHECKING_SYSTEM_
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.net.UnknownHostException;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
@@ -29,38 +28,38 @@ import javax.net.ssl.SSLSocket;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
-import org.apache.http.Header;
-import org.apache.http.HttpHost;
+import org.apache.http.*;
 import org.apache.http.HttpRequest;
 import org.apache.http.HttpResponse;
-import org.apache.http.HttpStatus;
-import org.apache.http.ProtocolException;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.NTCredentials;
+import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.HttpClient;
-import org.apache.http.conn.ConnectTimeoutException;
-import org.apache.http.conn.params.ConnRoutePNames;
-import org.apache.http.conn.scheme.PlainSocketFactory;
-import org.apache.http.conn.scheme.Scheme;
-import org.apache.http.conn.scheme.SchemeLayeredSocketFactory;
-import org.apache.http.conn.scheme.SchemeRegistry;
-import org.apache.http.conn.scheme.SchemeSocketFactory;
-import org.apache.http.conn.ssl.SSLSocketFactory;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.protocol.HttpClientContext;
+import org.apache.http.config.ConnectionConfig;
+import org.apache.http.config.RegistryBuilder;
+import org.apache.http.config.SocketConfig;
+import org.apache.http.conn.socket.ConnectionSocketFactory;
+import org.apache.http.conn.socket.LayeredConnectionSocketFactory;
+import org.apache.http.conn.socket.PlainConnectionSocketFactory;
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
+import org.apache.http.impl.client.BasicCredentialsProvider;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.DefaultRedirectStrategy;
-import org.apache.http.impl.conn.PoolingClientConnectionManager;
-import org.apache.http.params.BasicHttpParams;
-import org.apache.http.params.HttpConnectionParams;
-import org.apache.http.params.HttpParams;
+import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.apache.http.protocol.HttpContext;
 
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.ClientConfiguration;
-import com.amazonaws.http.impl.client.SdkHttpClient;
+import com.amazonaws.http.conn.HttpClientConnectionManagerFactory;
 import com.amazonaws.http.impl.client.SdkHttpRequestRetryHandler;
+import com.amazonaws.http.protocol.SdkHttpRequestExecutor;
+
 
 /** Responsible for creating and configuring instances of Apache HttpClient4. */
 class HttpClientFactory {
-
 
     /**
      * Creates a new HttpClient object using the specified AWS
@@ -72,39 +71,39 @@ class HttpClientFactory {
      *
      * @return The new, configured HttpClient.
      */
-    public HttpClient createHttpClient(ClientConfiguration config) {
-        /* Set HTTP client parameters */
-        HttpParams httpClientParams = new BasicHttpParams();
-        HttpConnectionParams.setConnectionTimeout(httpClientParams, config.getConnectionTimeout());
-        HttpConnectionParams.setSoTimeout(httpClientParams, config.getSocketTimeout());
-        HttpConnectionParams.setStaleCheckingEnabled(httpClientParams, true);
-        HttpConnectionParams.setTcpNoDelay(httpClientParams, true);
+    public CloseableHttpClient createHttpClient(ClientConfiguration config) {
+        ConnectionConfig.Builder connectionConfigBuilder = ConnectionConfig.custom();
 
         int socketSendBufferSizeHint = config.getSocketBufferSizeHints()[0];
         int socketReceiveBufferSizeHint = config.getSocketBufferSizeHints()[1];
         if (socketSendBufferSizeHint > 0 || socketReceiveBufferSizeHint > 0) {
-            HttpConnectionParams.setSocketBufferSize(httpClientParams,
-                    Math.max(socketSendBufferSizeHint, socketReceiveBufferSizeHint));
+            connectionConfigBuilder.setBufferSize(Math.max(socketSendBufferSizeHint, socketReceiveBufferSizeHint));
         }
 
-        PoolingClientConnectionManager connectionManager = ConnectionManagerFactory
-                .createPoolingClientConnManager(config, httpClientParams);
-        SdkHttpClient httpClient = new SdkHttpClient(connectionManager, httpClientParams);
-        httpClient.setHttpRequestRetryHandler(SdkHttpRequestRetryHandler.Singleton);
-        httpClient.setRedirectStrategy(new LocationHeaderNotRequiredRedirectStrategy());
+        ConnectionConfig connectionConfig = connectionConfigBuilder.build();
+        SocketConfig socketConfig = SocketConfig.custom()
+                .setTcpNoDelay(true)
+                .build();
 
+        RequestConfig requestConfig = RequestConfig.custom()
+                .setConnectTimeout(config.getConnectionTimeout())
+                .setSocketTimeout(config.getSocketTimeout())
+                .setStaleConnectionCheckEnabled(true)
+                .build();
+
+        SSLConnectionSocketFactory sslConnectionSocketFactory;
         try {
-            Scheme http = new Scheme("http", 80, PlainSocketFactory.getSocketFactory());
-            SSLSocketFactory sf = new SSLSocketFactory(
+            sslConnectionSocketFactory = new SSLConnectionSocketFactory(
                     SSLContext.getDefault(),
-                    SSLSocketFactory.STRICT_HOSTNAME_VERIFIER);
-            Scheme https = new Scheme("https", 443, sf);
-            SchemeRegistry sr = connectionManager.getSchemeRegistry();
-            sr.register(http);
-            sr.register(https);
+                    SSLConnectionSocketFactory.STRICT_HOSTNAME_VERIFIER
+            );
         } catch (NoSuchAlgorithmException e) {
             throw new AmazonClientException("Unable to access default SSL context", e);
         }
+
+        RegistryBuilder<ConnectionSocketFactory> registryBuilder = RegistryBuilder.<ConnectionSocketFactory>create()
+            .register("http", PlainConnectionSocketFactory.getSocketFactory())
+            .register("https", sslConnectionSocketFactory);
 
         /*
          * If SSL cert checking for endpoints has been explicitly disabled,
@@ -112,9 +111,20 @@ class HttpClientFactory {
          * error out.
          */
         if (System.getProperty(DISABLE_CERT_CHECKING_SYSTEM_PROPERTY) != null) {
-            Scheme sch = new Scheme("https", 443, new TrustingSocketFactory());
-            httpClient.getConnectionManager().getSchemeRegistry().register(sch);
+            registryBuilder.register("https", new TrustingSocketFactory());
         }
+
+        PoolingHttpClientConnectionManager connectionManager = ConnectionManagerFactory
+                .createPoolingClientConnManager(config, registryBuilder.build());
+
+        HttpClientBuilder httpClientBuilder = HttpClientBuilder.create()
+                .setDefaultSocketConfig(socketConfig)
+                .setDefaultRequestConfig(requestConfig)
+                .setDefaultConnectionConfig(connectionConfig)
+                .setRequestExecutor(new SdkHttpRequestExecutor())
+                .setConnectionManager(HttpClientConnectionManagerFactory.wrap(connectionManager))
+                .setRetryHandler(SdkHttpRequestRetryHandler.Singleton)
+                .setRedirectStrategy(new LocationHeaderNotRequiredRedirectStrategy());
 
         /* Set proxy if configured */
         String proxyHost = config.getProxyHost();
@@ -122,7 +132,7 @@ class HttpClientFactory {
         if (proxyHost != null && proxyPort > 0) {
             AmazonHttpClient.log.info("Configuring Proxy. Proxy Host: " + proxyHost + " " + "Proxy Port: " + proxyPort);
             HttpHost proxyHttpHost = new HttpHost(proxyHost, proxyPort);
-            httpClient.getParams().setParameter(ConnRoutePNames.DEFAULT_PROXY, proxyHttpHost);
+            httpClientBuilder.setProxy(proxyHttpHost);
 
             String proxyUsername    = config.getProxyUsername();
             String proxyPassword    = config.getProxyPassword();
@@ -130,13 +140,18 @@ class HttpClientFactory {
             String proxyWorkstation = config.getProxyWorkstation();
 
             if (proxyUsername != null && proxyPassword != null) {
-                httpClient.getCredentialsProvider().setCredentials(
+                CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+                credentialsProvider.setCredentials(
                         new AuthScope(proxyHost, proxyPort),
-                        new NTCredentials(proxyUsername, proxyPassword, proxyWorkstation, proxyDomain));
+                        new NTCredentials(proxyUsername, proxyPassword, proxyWorkstation, proxyDomain)
+                );
+                httpClientBuilder.setDefaultCredentialsProvider(
+                        credentialsProvider
+                );
             }
         }
 
-        return httpClient;
+        return httpClientBuilder.build();
     }
 
     /**
@@ -167,7 +182,7 @@ class HttpClientFactory {
      * LayeredSchemeSocketFactory) that bypasses SSL certificate checks. This
      * class is only intended to be used for testing purposes.
      */
-    private static class TrustingSocketFactory implements SchemeSocketFactory, SchemeLayeredSocketFactory {
+    private static class TrustingSocketFactory implements ConnectionSocketFactory, LayeredConnectionSocketFactory {
 
         private SSLContext sslcontext = null;
 
@@ -186,33 +201,25 @@ class HttpClientFactory {
             return this.sslcontext;
         }
 
-        public Socket createSocket(HttpParams params) throws IOException {
+        public Socket createSocket(HttpContext context) throws IOException {
             return getSSLContext().getSocketFactory().createSocket();
         }
 
-        public Socket connectSocket(Socket sock,
-                InetSocketAddress remoteAddress,
-                InetSocketAddress localAddress, HttpParams params)
-                throws IOException, UnknownHostException,
-                ConnectTimeoutException {
-            int connTimeout = HttpConnectionParams.getConnectionTimeout(params);
-            int soTimeout = HttpConnectionParams.getSoTimeout(params);
+        public Socket connectSocket(int connectTimeout,
+                Socket sock, HttpHost host, InetSocketAddress remoteAddress,
+                InetSocketAddress localAddress, HttpContext context) throws IOException {
+            RequestConfig reqConfig = (RequestConfig) context.getAttribute(HttpClientContext.REQUEST_CONFIG);
 
-            SSLSocket sslsock = (SSLSocket) ((sock != null) ? sock : createSocket(params));
+            SSLSocket sslsock = (SSLSocket) ((sock != null) ? sock : createSocket(context));
             if (localAddress != null) sslsock.bind(localAddress);
 
-            sslsock.connect(remoteAddress, connTimeout);
-            sslsock.setSoTimeout(soTimeout);
+            sslsock.connect(remoteAddress, connectTimeout >= 0 ? connectTimeout : reqConfig.getConnectTimeout());
+            sslsock.setSoTimeout(reqConfig.getSocketTimeout());
             return sslsock;
         }
 
-        public boolean isSecure(Socket sock) throws IllegalArgumentException {
-            return true;
-        }
-
-        public Socket createLayeredSocket(Socket arg0, String arg1, int arg2, HttpParams arg3)
-                throws IOException, UnknownHostException {
-            return getSSLContext().getSocketFactory().createSocket(arg0, arg1, arg2, true);
+        public Socket createLayeredSocket(Socket socket, String s, int i, HttpContext httpContext) throws IOException {
+            return getSSLContext().getSocketFactory().createSocket(socket, s, i, true);
         }
     }
 
