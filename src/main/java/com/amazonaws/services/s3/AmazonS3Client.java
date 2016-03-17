@@ -416,7 +416,7 @@ public class AmazonS3Client extends AmazonWebServiceClient implements AmazonS3 {
     private void init() {
         // Because of S3's virtual host style addressing, we need to change the
         // default, strict hostname verification to be more lenient.
-        client.disableStrictHostnameVerification();
+        client = client.disableStrictHostnameVerification();
 
         setEndpoint(Constants.S3_HOSTNAME);
 

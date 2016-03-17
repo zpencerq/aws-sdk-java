@@ -42,6 +42,7 @@ import org.apache.http.client.methods.HttpEntityEnclosingRequestBase;
 import org.apache.http.client.methods.HttpRequestBase;
 import org.apache.http.conn.scheme.Scheme;
 import org.apache.http.conn.scheme.SchemeRegistry;
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
 import org.apache.http.conn.ssl.SSLSocketFactory;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.protocol.BasicHttpContext;
@@ -177,28 +178,19 @@ public class AmazonHttpClient {
      * instead uses a browser compatible hostname verification strategy (i.e.
      * cert hostname wildcards are evaulated more liberally).
      */
-    public void disableStrictHostnameVerification() {
+    public AmazonHttpClient disableStrictHostnameVerification() {
 
         /*
          * If SSL cert checking for endpoints is disabled, we don't need
          * to do any changes to the SSL context.
          */
         if (System.getProperty(DISABLE_CERT_CHECKING_SYSTEM_PROPERTY) != null) {
-            return;
+            return this;
         }
 
-        try {
-            SchemeRegistry schemeRegistry = httpClient.getConnectionManager().getSchemeRegistry();
-
-            SSLSocketFactory sf = new SSLSocketFactory(
-                    SSLContext.getDefault(),
-                    SSLSocketFactory.BROWSER_COMPATIBLE_HOSTNAME_VERIFIER);
-            Scheme https = new Scheme("https", 443, sf);
-
-            schemeRegistry.register(https);
-        } catch (NoSuchAlgorithmException e) {
-            throw new AmazonClientException("Unable to access default SSL context to disable strict hostname verification");
-        }
+        ClientConfiguration newConfig = new ClientConfiguration(this.config);
+        newConfig.disableStrictHostnameVerification();
+        return new AmazonHttpClient(newConfig);
     }
     /**
      * Executes the request and returns the result.

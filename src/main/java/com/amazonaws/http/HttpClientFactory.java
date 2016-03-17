@@ -95,7 +95,7 @@ class HttpClientFactory {
         try {
             sslConnectionSocketFactory = new SSLConnectionSocketFactory(
                     SSLContext.getDefault(),
-                    SSLConnectionSocketFactory.STRICT_HOSTNAME_VERIFIER
+                    config.getHostnameVerifier()
             );
         } catch (NoSuchAlgorithmException e) {
             throw new AmazonClientException("Unable to access default SSL context", e);

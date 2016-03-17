@@ -20,6 +20,9 @@ import com.amazonaws.retry.PredefinedRetryPolicies;
 import com.amazonaws.retry.RetryPolicy;
 import com.amazonaws.http.IdleConnectionReaper;
 import com.amazonaws.util.VersionInfoUtils;
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
+import org.apache.http.conn.ssl.X509HostnameVerifier;
+
 /**
  * Client configuration options such as proxy settings, user agent string, max
  * retry attempts, etc.
@@ -136,6 +139,7 @@ public class ClientConfiguration {
      */
     private boolean useReaper = DEFAULT_USE_REAPER;
 
+    private X509HostnameVerifier hostnameVerifier = SSLConnectionSocketFactory.STRICT_HOSTNAME_VERIFIER;
 
     public ClientConfiguration() {}
 
@@ -154,6 +158,7 @@ public class ClientConfiguration {
         this.socketTimeout     = other.socketTimeout;
         this.userAgent         = other.userAgent;
         this.useReaper         = other.useReaper;
+        this.hostnameVerifier  = other.hostnameVerifier;
 
         this.socketReceiveBufferSizeHint = other.socketReceiveBufferSizeHint;
         this.socketSendBufferSizeHint    = other.socketSendBufferSizeHint;
@@ -825,4 +830,20 @@ public class ClientConfiguration {
         return this;
     }
 
+    public X509HostnameVerifier getHostnameVerifier() {
+        return hostnameVerifier;
+    }
+
+    public void setHostnameVerifier(X509HostnameVerifier hostnameVerifier) {
+        this.hostnameVerifier = hostnameVerifier;
+    }
+
+    public void disableStrictHostnameVerification() {
+        setHostnameVerifier(SSLConnectionSocketFactory.BROWSER_COMPATIBLE_HOSTNAME_VERIFIER);
+    }
+
+    public ClientConfiguration withHostnameVerifier(X509HostnameVerifier hostnameVerifier) {
+        setHostnameVerifier(hostnameVerifier);
+        return this;
+    }
 }
